@@ -44,8 +44,7 @@ export class SceneCodeLensProvider implements vscode.CodeLensProvider {
                 arguments: [scene.constructLineNumber, scene.name],
             }));
 
-            // 2. 检测 Scene 内的所有注释行
-            const commentRegex = /^\s+#\s*.+/;  // 缩进的注释行（排除顶级注释）
+            // 2. 检测 construct 方法内的注释行（只在 construct 方法体内）
 
             // 找到下一个 Scene 的起始行（用于确定当前 Scene 的范围）
             const sceneIndex = scenes.indexOf(scene);
@@ -53,10 +52,36 @@ export class SceneCodeLensProvider implements vscode.CodeLensProvider {
                 ? scenes[sceneIndex + 1].lineNumber
                 : lines.length;
 
-            // 收集所有注释行的位置
-            const commentLines: number[] = [];
+            // 获取 construct 方法的缩进级别（用于判断 construct 方法结束）
+            const constructLine = lines[scene.constructLineNumber];
+            const constructIndent = constructLine.match(/^(\s*)/)?.[1].length ?? 0;
+
+            // 找到 construct 方法的结束行：
+            // 遇到同级或更少缩进的 def / class / 装饰器行，或到 Scene 结束
+            let constructEnd = nextSceneStart;
+            const methodDefRegex = /^(\s*)(def\s|class\s|@)/;
             for (let i = scene.constructLineNumber + 1; i < nextSceneStart; i++) {
-                if (commentRegex.test(lines[i])) {
+                const line = lines[i];
+                if (line.trim() === '') { continue; } // 跳过空行
+                const match = line.match(methodDefRegex);
+                if (match) {
+                    const indent = match[1].length;
+                    if (indent <= constructIndent) {
+                        constructEnd = i;
+                        break;
+                    }
+                }
+            }
+
+            // construct 方法体内注释的缩进应该比 construct def 行更深
+            const bodyIndentMin = constructIndent + 1;
+            const commentRegex = /^(\s+)#\s*.+/;
+
+            // 收集 construct 方法体内的注释行
+            const commentLines: number[] = [];
+            for (let i = scene.constructLineNumber + 1; i < constructEnd; i++) {
+                const match = lines[i].match(commentRegex);
+                if (match && match[1].length >= bodyIndentMin) {
                     commentLines.push(i);
                 }
             }
